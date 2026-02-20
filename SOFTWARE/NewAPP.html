@@ -1,0 +1,284 @@
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AUCKAM – Inventory Management</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body { font-family: Arial; margin:0; padding:20px; background:#fff; color:#000; }
+.header { display:flex; align-items:center; gap:15px; margin-bottom:15px; }
+h1 { margin:0; color:#1e293b; }
+
+input, button, select {
+  padding:8px;
+  font-size:14px;
+  border-radius:5px;
+  border:1px solid #ccc;
+}
+button { cursor:pointer; background:#1e293b; color:#fff; }
+
+.overlay {
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.6);
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  z-index:9999;
+}
+.login-box {
+  background:#fff;
+  padding:25px;
+  border-radius:10px;
+  text-align:center;
+  width:300px;
+}
+
+table { width:100%; border-collapse:collapse; margin-top:15px; }
+th, td { padding:8px; border:1px solid #ddd; text-align:center; }
+th { background:#1e293b; color:#fff; }
+
+tr.low-stock { background:#ffd6d6 !important; }
+.buffer { background:#f1f5f9; }
+.buffer input, .buffer select { width:120px; }
+.project-cell { font-weight:700; }
+
+.search-wrapper { position:relative; width:420px; margin-bottom:10px; }
+.shortlist {
+  position:absolute;
+  top:38px;
+  left:0;
+  right:0;
+  background:#fff;
+  border:1px solid #ccc;
+  border-radius:6px;
+  max-height:220px;
+  overflow-y:auto;
+  z-index:1000;
+}
+.shortlist div { padding:8px; cursor:pointer; }
+.shortlist div:hover { background:#e5e7eb; }
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div class="overlay" id="loginOverlay">
+  <div class="login-box">
+    <h2>Enter Your Name</h2>
+    <input id="userInput" placeholder="Your name"><br><br>
+    <button onclick="login()">Login</button>
+    <p id="loginMsg" style="color:red;"></p>
+  </div>
+</div>
+
+<div id="mainContent" style="display:none;">
+
+<div class="header">
+  <img width="220" src="https://auckam.com/wp-content/uploads/2025/05/auckam-logo-2.png">
+  <h1>INVENTORY MANAGEMENT</h1>
+</div>
+
+<div class="search-wrapper">
+  <input id="searchInput" placeholder="Search: resistor 10k | capacitor | 805 | TO-220">
+  <div id="shortlist" class="shortlist" style="display:none;"></div>
+</div>
+
+<table>
+<thead>
+<tr>
+  <th>Project</th>
+  <th>Component</th>
+  <th>Package</th>
+  <th>Value</th>
+  <th>Quantity</th>
+  <th>Stock In</th>
+  <th>Stock Out</th>
+  <th>Remarks</th>
+</tr>
+
+<tr class="buffer">
+  <td>
+    <select id="bProject" onchange="handleProjectChange()">
+      <option value="">Select Project</option>
+    </select>
+
+    <!-- 🔹 NEW PROJECT INPUT (ADDED) -->
+    <input id="bNewProject"
+           placeholder="Enter New Project"
+           style="display:none; margin-top:6px;">
+  </td>
+
+  <td><input id="bComponent" placeholder="Component"></td>
+  <td><input id="bPackage" placeholder="Package"></td>
+  <td><input id="bValue" placeholder="Value"></td>
+  <td><input id="bQty" type="number" placeholder="Qty"></td>
+  <td colspan="2">
+    <button onclick="addBufferRow()">➕ ADD</button>
+  </td>
+  <td><input id="bRemarks" placeholder="Remarks"></td>
+</tr>
+</thead>
+
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbzVgKqCUm-oM_CSdPkP5iMfAreJ7HL1eKYiKyBm3r7AykhO5k4TcpsplYRVCcWDismT_w/exec";
+
+let stockData = [];
+let projectList = [];
+let userName = localStorage.getItem("stockUser") || "";
+
+/* PROJECT COLORS */
+const projectColors = {};
+const palette = ["#e0f2fe","#dcfce7","#fef3c7","#ede9fe","#fce7f3","#fff7ed","#ecfeff"];
+function getProjectColor(p){
+  if(!projectColors[p]){
+    projectColors[p] = palette[Object.keys(projectColors).length % palette.length];
+  }
+  return projectColors[p];
+}
+
+/* LOGIN */
+if(userName){ loginOverlay.style.display="none"; mainContent.style.display="block"; loadData(); }
+function login(){
+  if(!userInput.value.trim()) return loginMsg.innerText="Please enter your name";
+  userName=userInput.value.trim();
+  localStorage.setItem("stockUser",userName);
+  loginOverlay.style.display="none";
+  mainContent.style.display="block";
+  loadData();
+}
+
+/* LOAD DATA */
+async function loadData(){
+  const res = await fetch(API_URL);
+  stockData = await res.json();
+  await loadProjects();
+  buildSearchIndex();
+  render(stockData);
+}
+
+/* LOAD PROJECTS */
+async function loadProjects(){
+  const res = await fetch(`${API_URL}?mode=projects`);
+  projectList = await res.json();
+  buildProjectDropdown();
+}
+
+function buildProjectDropdown(){
+  bProject.innerHTML = `<option value="">Select Project</option>`;
+  projectList.forEach(p=>{
+    const opt=document.createElement("option");
+    opt.value=p;
+    opt.textContent=p;
+    bProject.appendChild(opt);
+  });
+
+  /* 🔹 NEW+ OPTION (ADDED) */
+  const newOpt=document.createElement("option");
+  newOpt.value="NEW+";
+  newOpt.textContent="NEW +";
+  bProject.appendChild(newOpt);
+}
+
+/* 🔹 HANDLE NEW+ */
+function handleProjectChange(){
+  if(bProject.value==="NEW+"){
+    bNewProject.style.display="block";
+  } else {
+    bNewProject.style.display="none";
+    bNewProject.value="";
+  }
+}
+
+/* RENDER */
+function render(data){
+  tableBody.innerHTML="";
+  data.forEach(i=>{
+    const key=`${i.project}__${i.component}`;
+    const tr=document.createElement("tr");
+    if(i.quantity<=5) tr.classList.add("low-stock");
+    tr.style.background=getProjectColor(i.project);
+
+    tr.innerHTML=`
+<td class="project-cell">${i.project}</td>
+<td>${i.component}</td>
+<td>${i.package}</td>
+<td>${i.value}</td>
+<td id="qty-${key}">${i.quantity}</td>
+<td><input id="in-${key}" type="number" style="width:60px">
+<button onclick="updateStock('${i.project}','${i.component}','in')">In</button></td>
+<td><input id="out-${key}" type="number" style="width:60px">
+<button onclick="updateStock('${i.project}','${i.component}','out')">Out</button></td>
+<td>${i.remarks||""}</td>`;
+    tableBody.appendChild(tr);
+  });
+}
+
+/* UPDATE STOCK */
+function updateStock(project, component, action){
+  const key=`${project}__${component}`;
+  const qty=Number(document.getElementById(`${action}-${key}`).value);
+  if(!qty||qty<=0) return alert("Enter valid quantity");
+
+  fetch(`${API_URL}?project=${project}&user=${userName}&item=${component}&action=${action}&quantity=${qty}`)
+    .then(()=>loadData());
+}
+
+/* ADD ITEM (NEW+ SUPPORT) */
+function addBufferRow(){
+  let finalProject=bProject.value;
+
+  if(finalProject==="NEW+"){
+    if(!bNewProject.value.trim()) return alert("Enter new project name");
+    finalProject=bNewProject.value.trim().toUpperCase();
+  }
+
+  if(!finalProject||!bComponent.value)
+    return alert("Project & Component required");
+
+  fetch(`${API_URL}?mode=add`
+    +`&project=${encodeURIComponent(finalProject)}`
+    +`&component=${encodeURIComponent(bComponent.value)}`
+    +`&package=${encodeURIComponent(bPackage.value)}`
+    +`&value=${encodeURIComponent(bValue.value)}`
+    +`&quantity=${encodeURIComponent(bQty.value)}`
+    +`&remarks=${encodeURIComponent(bRemarks.value)}`)
+    .then(()=>loadData());
+
+  bComponent.value=bPackage.value=bValue.value=bQty.value=bRemarks.value=bNewProject.value="";
+}
+
+/* SEARCH */
+let searchIndex=[];
+function buildSearchIndex(){
+  searchIndex=stockData.map(i=>({
+    text:`${i.component} ${i.value} ${i.package}`.toLowerCase(),
+    item:i
+  }));
+}
+searchInput.addEventListener("input",()=>{
+  const q=searchInput.value.toLowerCase().trim();
+  if(!q){ render(stockData); return; }
+  const t=q.split(" ");
+  render(searchIndex.filter(x=>t.every(a=>x.text.includes(a))).map(x=>x.item));
+});
+</script>
+
+</body>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("service-worker.js");
+  });
+}
+</script>
+</html>
